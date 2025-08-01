@@ -71,26 +71,76 @@ jobs:
           echo "  pkill firefox   - Close Firefox"
           echo "  x11vnc          - Start VNC server to view GUI remotely"
           echo ""
+          EOF
           
-          # Create Chrome launcher commands
-          echo '#!/bin/bash' > /home/sshuser/chrome
-          echo 'export DISPLAY=:1' >> /home/sshuser/chrome
-          echo 'google-chrome --no-sandbox --disable-dev-shm-usage --disable-gpu --remote-debugging-port=9222 "$@" &' >> /home/sshuser/chrome
-          chmod +x /home/sshuser/chrome
+          # Create Chrome auto-launch script for direct browser access
+          sudo tee /home/sshuser/start-chrome-browser.sh > /dev/null << 'EOF'
+          #!/bin/bash
+          export DISPLAY=:1
           
-          echo '#!/bin/bash' > /home/sshuser/chrome-headless
-          echo 'google-chrome --headless --no-sandbox --disable-dev-shm-usage --disable-gpu --remote-debugging-port=9222 "$@" &' >> /home/sshuser/chrome-headless
-          chmod +x /home/sshuser/chrome-headless
+          # Start virtual display if not running
+          if ! pgrep -x "Xvfb" > /dev/null; then
+              Xvfb :1 -screen 0 1920x1080x24 > /dev/null 2>&1 &
+              sleep 2
+          fi
           
-          echo '#!/bin/bash' > /home/sshuser/firefox
-          echo 'export DISPLAY=:1' >> /home/sshuser/firefox
-          echo 'firefox "$@" &' >> /home/sshuser/firefox
-          chmod +x /home/sshuser/firefox
+          # Start window manager if not running
+          if ! pgrep -x "fluxbox" > /dev/null; then
+              fluxbox > /dev/null 2>&1 &
+              sleep 1
+          fi
+          
+          # Kill existing Chrome processes
+          pkill -f google-chrome > /dev/null 2>&1
+          sleep 1
+          
+          echo "🚀 Starting Chrome Browser with Tampermonkey..."
+          echo "📋 Opening Tampermonkey installation page..."
+          
+          # Start Chrome with Tampermonkey installation page
+          google-chrome \
+              --no-sandbox \
+              --disable-dev-shm-usage \
+              --disable-gpu \
+              --disable-web-security \
+              --disable-features=VizDisplayCompositor \
+              --start-maximized \
+              --no-first-run \
+              --no-default-browser-check \
+              --disable-default-apps \
+              --remote-debugging-port=9222 \
+              "https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" \
+              > /dev/null 2>&1 &
+          
+          sleep 3
+          echo "✅ Chrome is now running with Tampermonkey installation page!"
+          echo "🔧 To install Tampermonkey: Click 'Add to Chrome' button"
+          echo "🌐 Chrome Remote Debugging: http://localhost:9222"
+          echo ""
+          
+          # Keep the session alive and show Chrome status
+          while true; do
+              if pgrep -f google-chrome > /dev/null; then
+                  echo "🟢 Chrome is running... ($(date '+%H:%M:%S'))"
+              else
+                  echo "🔴 Chrome stopped. Restarting..."
+                  google-chrome \
+                      --no-sandbox \
+                      --disable-dev-shm-usage \
+                      --disable-gpu \
+                      --start-maximized \
+                      --remote-debugging-port=9222 \
+                      "https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" \
+                      > /dev/null 2>&1 &
+              fi
+              sleep 30
+          done
           EOF
           
           sudo chmod +x /home/sshuser/start-gui.sh
+          sudo chmod +x /home/sshuser/start-chrome-browser.sh
           sudo chown -R sshuser:sshuser /home/sshuser
-          echo "✅ Created user 'sshuser' with GUI environment setup"
+          echo "✅ Created user 'sshuser' with GUI environment and Chrome auto-launch setup"
 
       - name: Install Tampermonkey Extension
         run: |
@@ -134,15 +184,15 @@ jobs:
           sudo npm install -g localtunnel
           echo "✅ LocalTunnel installed"
 
-      - name: Start ttyd web terminal
+      - name: Start ttyd web terminal with Chrome browser
         run: |
-          # Start ttyd with direct bash shell (no login required)
-          nohup ttyd -p 3000 -i 0.0.0.0 -t titleFixed=GitHub-Actions-SSH -t fontSize=16 -c sshuser:${{ github.event.inputs.password }} bash > ttyd.log 2>&1 &
+          # Start ttyd with Chrome browser auto-launch instead of bash shell
+          nohup ttyd -p 3000 -i 0.0.0.0 -t titleFixed=Chrome-Browser-Session -t fontSize=14 -c sshuser:${{ github.event.inputs.password }} /home/sshuser/start-chrome-browser.sh > ttyd.log 2>&1 &
           sleep 5
           
           # Check if ttyd is running
           if pgrep -f ttyd > /dev/null; then
-            echo "✅ ttyd server started on port 3000"
+            echo "✅ ttyd server started on port 3000 with Chrome auto-launch"
             # Test local connection
             if curl -s http://localhost:3000 | grep -q "ttyd"; then
               echo "✅ ttyd responding correctly"
@@ -174,7 +224,7 @@ jobs:
           done
           
           if [ -n "$TUNNEL_URL" ]; then
-            echo "🎉 SUCCESS! Web Terminal with Chrome Browser is ready!"
+            echo "🎉 SUCCESS! Chrome Browser with Tampermonkey Auto-Launch is ready!"
             echo "========================================================="
             echo "🌐 URL: $TUNNEL_URL"
             echo "👤 Username: sshuser"
@@ -182,18 +232,17 @@ jobs:
             echo "⏰ Duration: ${{ github.event.inputs.duration }} minutes"
             echo "========================================================="
             echo ""
-            echo "🚀 GETTING STARTED:"
-            echo "1. Access the terminal via the URL above"
-            echo "2. Login with sshuser and your password"
-            echo "3. The GUI environment is already running!"
+            echo "🚀 WHAT HAPPENS WHEN YOU LOGIN:"
+            echo "✅ Chrome browser will automatically start"
+            echo "✅ Tampermonkey installation page will open"
+            echo "✅ Just click 'Add to Chrome' to install Tampermonkey"
+            echo "✅ No terminal commands needed!"
             echo ""
-            echo "🌐 BROWSER COMMANDS:"
-            echo "   chrome              - Start Chrome in GUI mode"
-            echo "   chrome-headless     - Start Chrome in headless mode"
-            echo "   firefox             - Start Firefox in GUI mode"
-            echo "   pkill chrome        - Close Chrome"
-            echo "   pkill firefox       - Close Firefox"
-            echo "   x11vnc -display :1  - Start VNC server to view GUI"
+            echo "🌐 CHROME FEATURES:"
+            echo "   • Full browser interface"
+            echo "   • Tampermonkey installation ready"
+            echo "   • Auto-restart if Chrome crashes"
+            echo "   • Remote debugging on port 9222"
             echo ""
             echo "📋 To bypass LocalTunnel reminder:"
             echo "   • Add header: bypass-tunnel-reminder: true"
@@ -201,17 +250,17 @@ jobs:
             echo "   • Browser extension: ModHeader (recommended)"
             echo ""
             echo "✨ FEATURES INCLUDED:"
-            echo "   ✅ Google Chrome with Tampermonkey extension"
-            echo "   ✅ Firefox browser"
-            echo "   ✅ Full GUI environment (Fluxbox)"
-            echo "   ✅ Virtual display (1920x1080)"
-            echo "   ✅ Sudo access for package installation"
+            echo "   ✅ Auto-launching Chrome browser"
+            echo "   ✅ Tampermonkey installation page ready"
+            echo "   ✅ Full GUI environment (1920x1080)"
+            echo "   ✅ Auto-restart on browser crashes"
+            echo "   ✅ No terminal knowledge required"
             echo ""
             echo "🔧 Test command:"
             echo "curl -H 'bypass-tunnel-reminder: true' $TUNNEL_URL"
             
             # Write to GitHub step summary
-            echo "## 🚀 Web SSH Terminal with Chrome Browser Ready" >> $GITHUB_STEP_SUMMARY
+            echo "## 🚀 Chrome Browser with Auto-Launch Ready" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
             echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
@@ -219,12 +268,11 @@ jobs:
             echo "| **Username** | sshuser |" >> $GITHUB_STEP_SUMMARY
             echo "| **Duration** | ${{ github.event.inputs.duration }} minutes |" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### 🌐 Browser Commands:" >> $GITHUB_STEP_SUMMARY
-            echo "- \`chrome\` - Start Chrome in GUI mode" >> $GITHUB_STEP_SUMMARY
-            echo "- \`chrome-headless\` - Start Chrome in headless mode" >> $GITHUB_STEP_SUMMARY
-            echo "- \`firefox\` - Start Firefox in GUI mode" >> $GITHUB_STEP_SUMMARY
-            echo "- \`pkill chrome\` - Close Chrome" >> $GITHUB_STEP_SUMMARY
-            echo "- \`x11vnc -display :1\` - Start VNC server for remote GUI access" >> $GITHUB_STEP_SUMMARY
+            echo "### 🌐 What You'll See:" >> $GITHUB_STEP_SUMMARY
+            echo "- **Chrome browser automatically starts**" >> $GITHUB_STEP_SUMMARY
+            echo "- **Tampermonkey installation page opens**" >> $GITHUB_STEP_SUMMARY
+            echo "- **Click 'Add to Chrome' to install Tampermonkey**" >> $GITHUB_STEP_SUMMARY
+            echo "- **No terminal commands needed!**" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### 🔧 Bypass Reminder Instructions:" >> $GITHUB_STEP_SUMMARY
             echo "- Install **ModHeader** browser extension" >> $GITHUB_STEP_SUMMARY
