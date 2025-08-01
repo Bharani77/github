@@ -32,17 +32,7 @@ jobs:
         run: sudo npm install -g localtunnel
 
       - name: Start LocalTunnel
-        id: localtunnel
         run: |
-          # Try to get subdomain, fallback to random if taken
-          SUBDOMAIN=ghactionswetty
-          LT_URL=$(lt --port 3000 --subdomain $SUBDOMAIN --print-requests 2>/dev/null &)
+          nohup lt --port 3000 --subdomain ghactionswetty > lt.log 2>&1 &
           sleep 5
-          # Fetch the actual URL from localtunnel's stdout log
-          # Unfortunately localtunnel CLI doesn't provide a clean way to get URL programmatically
-          # So let's start localtunnel in background and print the URL manually here:
-          echo "LocalTunnel running at https://$SUBDOMAIN.loca.lt"
-          echo "lt_url=https://$SUBDOMAIN.loca.lt" >> $GITHUB_OUTPUT
-
-      - name: Show LocalTunnel URL
-        run: echo "Open your browser at: ${{ steps.localtunnel.outputs.lt_url }}"
+          echo "Open your browser at: https://ghactionswetty.loca.lt"
