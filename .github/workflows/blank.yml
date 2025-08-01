@@ -1,4 +1,4 @@
-name: Chrome Browser with noVNC Web Interface
+name: Chrome Browser Web Interface
 on:
   workflow_dispatch:
     inputs:
@@ -8,213 +8,125 @@ on:
         default: '60'
         type: string
       password:
-        description: 'VNC Password (6 characters minimum)'
+        description: 'VNC Password'
         required: true
         type: string
 
 jobs:
-  chrome-browser-vnc:
+  chrome-web:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - name: Install packages and setup VNC
+      - name: Setup environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            xvfb x11vnc fluxbox xterm \
-            nodejs npm wget curl \
-            google-chrome-stable \
-            git python3 python3-pip
+          sudo apt-get install -y wget curl nodejs npm
           
-          # Install noVNC
-          git clone https://github.com/novnc/noVNC.git /tmp/noVNC
-          git clone https://github.com/novnc/websockify /tmp/websockify
+          # Install Chrome
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
           
-          echo "✅ Installed Chrome and VNC components"
+          # Install VNC and GUI components
+          sudo apt-get install -y tigervnc-standalone-server fluxbox xterm
+          
+          echo "✅ Environment setup complete"
 
-      - name: Setup VNC environment
+      - name: Configure VNC
         run: |
-          # Create VNC user
-          sudo useradd -m -s /bin/bash chromeuser
-          echo "chromeuser:${{ github.event.inputs.password }}" | sudo chpasswd
-          sudo usermod -aG sudo chromeuser
+          # Create VNC directory and set password
+          mkdir -p ~/.vnc
+          echo "${{ github.event.inputs.password }}" | vncpasswd -f > ~/.vnc/passwd
+          chmod 600 ~/.vnc/passwd
           
-          # Setup VNC directories
-          sudo mkdir -p /home/chromeuser/.vnc
-          
-          # Create VNC password (must be 6-8 characters)
-          VNC_PASSWORD="${{ github.event.inputs.password }}"
-          if [ ${#VNC_PASSWORD} -lt 6 ]; then
-            VNC_PASSWORD="${VNC_PASSWORD}123456"
-          fi
-          VNC_PASSWORD_TRUNCATED=${VNC_PASSWORD:0:8}
-          
-          sudo -u chromeuser bash -c "echo '$VNC_PASSWORD_TRUNCATED' | vncpasswd -f > /home/chromeuser/.vnc/passwd"
-          sudo chmod 600 /home/chromeuser/.vnc/passwd
-          sudo chown chromeuser:chromeuser /home/chromeuser/.vnc/passwd
-          
-          # Create startup script
-          sudo tee /home/chromeuser/.vnc/xstartup > /dev/null << 'EOF'
+          # Create VNC startup script
+          cat > ~/.vnc/xstartup << 'XSTART'
 #!/bin/bash
-xrdb $HOME/.Xresources
-xsetroot -solid grey
 fluxbox &
-# Wait a moment for window manager to start
-sleep 2
-# Start Chrome with Tampermonkey page
-google-chrome \
-  --no-sandbox \
-  --disable-dev-shm-usage \
-  --disable-gpu \
-  --start-maximized \
-  --no-first-run \
-  --no-default-browser-check \
-  --disable-default-apps \
-  "https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" &
-EOF
+sleep 3
+google-chrome --no-sandbox --disable-dev-shm-usage --disable-gpu --start-maximized --no-first-run "https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" &
+XSTART
           
-          sudo chmod +x /home/chromeuser/.vnc/xstartup
-          sudo chown chromeuser:chromeuser /home/chromeuser/.vnc/xstartup
-          
-          echo "✅ VNC environment configured"
+          chmod +x ~/.vnc/xstartup
+          echo "✅ VNC configured"
 
       - name: Start VNC server
         run: |
-          # Start VNC server as chromeuser
-          sudo -u chromeuser bash -c "cd /home/chromeuser && vncserver :1 -geometry 1920x1080 -depth 24" || true
-          sleep 3
-          
-          # Check if VNC server is running
-          if sudo -u chromeuser vncserver -list | grep -q ":1"; then
-            echo "✅ VNC server started on display :1"
-          else
-            echo "❌ VNC server failed to start"
-            # Try to start X11VNC instead
-            sudo -u chromeuser bash -c "export DISPLAY=:1 && Xvfb :1 -screen 0 1920x1080x24 &"
-            sleep 2
-            sudo -u chromeuser bash -c "export DISPLAY=:1 && fluxbox &"
-            sleep 1
-            sudo -u chromeuser bash -c "export DISPLAY=:1 && google-chrome --no-sandbox --disable-dev-shm-usage --disable-gpu --start-maximized --no-first-run 'https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo' &"
-            sleep 2
-            sudo -u chromeuser bash -c "x11vnc -display :1 -nopw -listen localhost -xkb -ncache 10 -ncache_cr -forever -shared &"
-            echo "✅ X11VNC server started as fallback"
-          fi
-
-      - name: Start noVNC web interface
-        run: |
-          cd /tmp/noVNC
-          # Start websockify to bridge VNC and WebSocket
-          python3 /tmp/websockify/websockify.py --web . 6080 localhost:5901 &
-          sleep 5
-          
-          # Check if noVNC is running
-          if curl -s http://localhost:6080 | grep -q "noVNC"; then
-            echo "✅ noVNC web interface started on port 6080"
-          else
-            echo "❌ noVNC failed to start"
-            exit 1
-          fi
-
-      - name: Install LocalTunnel and expose
-        run: |
-          sudo npm install -g localtunnel
-          
-          # Start LocalTunnel
-          nohup lt --port 6080 > lt.log 2>&1 &
+          vncserver :1 -geometry 1920x1080 -depth 24
           sleep 10
+          echo "✅ VNC server started"
+
+      - name: Setup web interface
+        run: |
+          # Install websockify for VNC web access
+          pip3 install websockify
           
-          # Extract URL
-          for i in {1..5}; do
-            TUNNEL_URL=$(grep -o 'https://.*\.loca\.lt' lt.log | head -1)
-            if [ -n "$TUNNEL_URL" ]; then
-              break
-            fi
-            echo "Attempt $i: Waiting for LocalTunnel URL..."
-            sleep 5
-          done
+          # Download noVNC
+          wget https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz
+          tar xf v1.4.0.tar.gz
+          mv noVNC-1.4.0 novnc
+          
+          echo "✅ Web interface ready"
+
+      - name: Start web server
+        run: |
+          cd novnc
+          # Start websockify to bridge VNC to web
+          websockify --web . 6080 localhost:5901 &
+          sleep 5
+          echo "✅ Web server running on port 6080"
+
+      - name: Create tunnel
+        run: |
+          npm install -g localtunnel
+          
+          # Start tunnel
+          nohup lt --port 6080 > tunnel.log 2>&1 &
+          sleep 15
+          
+          # Get tunnel URL
+          TUNNEL_URL=$(grep -o 'https://.*\.loca\.lt' tunnel.log | head -1)
           
           if [ -n "$TUNNEL_URL" ]; then
-            echo "🎉 SUCCESS! Chrome Browser Web Interface Ready!"
-            echo "========================================================="
+            echo "🎉 SUCCESS! Chrome Browser is Ready!"
+            echo "================================================"
             echo "🌐 URL: $TUNNEL_URL"
-            echo "🔑 VNC Password: ${{ github.event.inputs.password }}"
+            echo "🔑 Password: ${{ github.event.inputs.password }}"
             echo "⏰ Duration: ${{ github.event.inputs.duration }} minutes"
-            echo "========================================================="
+            echo "================================================"
             echo ""
-            echo "🖥️ DIRECT CHROME BROWSER ACCESS:"
-            echo "✅ Full Chrome browser in your web browser"
-            echo "✅ Tampermonkey installation page auto-opens"
-            echo "✅ Click anywhere to focus, then 'Add to Chrome'"
-            echo "✅ Full mouse and keyboard support"
-            echo ""
-            echo "📋 USAGE INSTRUCTIONS:"
-            echo "1. Click the tunnel URL above"
-            echo "2. Click 'Connect' on the noVNC page"
-            echo "3. Enter VNC password when prompted"
-            echo "4. You'll see Chrome with Tampermonkey page open"
+            echo "📋 How to Use:"
+            echo "1. Click the URL above"
+            echo "2. Click 'Connect' button"
+            echo "3. Enter your password"
+            echo "4. Chrome will appear with Tampermonkey page"
             echo "5. Click 'Add to Chrome' to install Tampermonkey"
             echo ""
-            echo "🔧 FEATURES:"
-            echo "   ✅ Real Chrome browser interface"
-            echo "   ✅ Full screen interaction"
-            echo "   ✅ Copy/paste support"
-            echo "   ✅ Resolution: 1920x1080"
-            echo ""
+            echo "✨ You'll see the actual Chrome browser interface!"
             
             # GitHub summary
-            echo "## 🖥️ Chrome Browser Web Interface Ready" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
-            echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
-            echo "| **URL** | $TUNNEL_URL |" >> $GITHUB_STEP_SUMMARY
-            echo "| **VNC Password** | ${{ github.event.inputs.password }} |" >> $GITHUB_STEP_SUMMARY
-            echo "| **Resolution** | 1920x1080 |" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### 🚀 How to Use:" >> $GITHUB_STEP_SUMMARY
-            echo "1. Click the URL above" >> $GITHUB_STEP_SUMMARY
-            echo "2. Click 'Connect' button" >> $GITHUB_STEP_SUMMARY
-            echo "3. Enter the VNC password" >> $GITHUB_STEP_SUMMARY
-            echo "4. Chrome browser will appear with Tampermonkey page" >> $GITHUB_STEP_SUMMARY
-            echo "5. Click 'Add to Chrome' to install Tampermonkey" >> $GITHUB_STEP_SUMMARY
+            echo "## 🚀 Chrome Browser Ready" >> $GITHUB_STEP_SUMMARY
+            echo "**URL:** $TUNNEL_URL" >> $GITHUB_STEP_SUMMARY
+            echo "**Password:** ${{ github.event.inputs.password }}" >> $GITHUB_STEP_SUMMARY
+            echo "**Usage:** Click URL → Connect → Enter Password → Use Chrome" >> $GITHUB_STEP_SUMMARY
             
           else
-            echo "❌ Failed to get LocalTunnel URL"
-            cat lt.log
+            echo "❌ Failed to create tunnel"
+            cat tunnel.log
             exit 1
           fi
 
-      - name: Keep session alive
+      - name: Keep alive
         run: |
-          echo "🕐 Keeping Chrome browser session alive for ${{ github.event.inputs.duration }} minutes..."
-          
-          DURATION_SECONDS=$((${{ github.event.inputs.duration }} * 60))
-          INTERVAL=300
-          ELAPSED=0
-          
-          while [ $ELAPSED -lt $DURATION_SECONDS ]; do
-            if [ $((ELAPSED % INTERVAL)) -eq 0 ] && [ $ELAPSED -gt 0 ]; then
-              REMAINING=$(((DURATION_SECONDS - ELAPSED) / 60))
-              echo "⏰ Browser session active - $REMAINING minutes remaining"
-              
-              # Check if Chrome is still running and restart if needed
-              if ! pgrep -f google-chrome > /dev/null; then
-                echo "🔄 Restarting Chrome..."
-                sudo -u chromeuser bash -c "export DISPLAY=:1 && google-chrome --no-sandbox --disable-dev-shm-usage --disable-gpu --start-maximized --no-first-run 'https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo' &" || true
-              fi
-            fi
-            sleep 60
-            ELAPSED=$((ELAPSED + 60))
-          done
-          
-          echo "⏰ Session expired. Shutting down..."
+          echo "🕐 Keeping session alive for ${{ github.event.inputs.duration }} minutes..."
+          sleep $((${{ github.event.inputs.duration }} * 60))
+          echo "⏰ Session ended"
 
       - name: Cleanup
         if: always()
         run: |
-          echo "🧹 Cleaning up..."
           pkill -f localtunnel || true
           pkill -f websockify || true
-          pkill -f google-chrome || true
-          sudo -u chromeuser vncserver -kill :1 || true
-          sudo userdel -r chromeuser 2>/dev/null || true
-          echo "✅ Cleanup completed"
+          vncserver -kill :1 || true
+          echo "✅ Cleanup complete"
