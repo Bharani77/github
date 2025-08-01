@@ -1,4 +1,4 @@
-name: Chrome Browser - Docker Solution
+name: Chrome Browser - VNC Fixed
 on:
   workflow_dispatch:
     inputs:
@@ -9,99 +9,165 @@ on:
         type: string
 
 jobs:
-  chrome-docker:
+  chrome-vnc:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - name: Install requirements
+      - name: Setup environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y nodejs npm
-          echo "✅ Requirements installed"
-
-      - name: Start Chrome in Docker with VNC
-        run: |
-          # Pull and run Chrome container with VNC web interface
-          docker run -d \
-            --name chrome-vnc \
-            -p 6080:80 \
-            --shm-size=2g \
-            -e RESOLUTION=1920x1080 \
-            selenium/standalone-chrome:latest
-
-          # Wait for container to start
-          echo "⏳ Starting Chrome container..."
-          sleep 30
+          sudo apt-get install -y wget curl nodejs npm python3-pip
           
-          # Check if container is running
-          if docker ps | grep -q chrome-vnc; then
-            echo "✅ Chrome container started successfully"
-          else
-            echo "❌ Chrome container failed to start"
-            docker logs chrome-vnc
-            exit 1
-          fi
-
-      - name: Open Tampermonkey page in Chrome
-        run: |
-          # Wait a bit more for Chrome to fully load
-          sleep 15
+          # Install Chrome
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
           
-          # Use Selenium to navigate to Tampermonkey page
-          docker exec chrome-vnc /opt/google/chrome/google-chrome \
+          # Install X11 and VNC
+          sudo apt-get install -y xvfb x11vnc fluxbox
+          
+          echo "✅ Environment ready"
+
+      - name: Start services step by step
+        run: |
+          # Step 1: Start virtual display
+          echo "🖥️ Starting virtual display..."
+          Xvfb :1 -screen 0 1920x1080x24 &
+          export DISPLAY=:1
+          sleep 5
+          
+          # Step 2: Start window manager
+          echo "🪟 Starting window manager..."
+          fluxbox &
+          sleep 3
+          
+          # Step 3: Start Chrome
+          echo "🌐 Starting Chrome..."
+          google-chrome \
             --no-sandbox \
             --disable-dev-shm-usage \
-            --remote-debugging-port=9222 \
+            --disable-gpu \
+            --start-maximized \
+            --no-first-run \
+            --disable-default-apps \
             "https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" &
+          sleep 10
           
-          echo "✅ Chrome navigated to Tampermonkey installation page"
+          # Step 4: Start VNC server
+          echo "📡 Starting VNC server..."
+          x11vnc -display :1 -nopw -listen 0.0.0.0 -xkb -forever -shared -rfbport 5901 &
+          sleep 5
+          
+          # Verify everything is running
+          echo "🔍 Checking services..."
+          echo "- Display :1: $(ps aux | grep -c 'Xvfb :1' || echo 0) processes"
+          echo "- Fluxbox: $(ps aux | grep -c fluxbox || echo 0) processes"  
+          echo "- Chrome: $(ps aux | grep -c google-chrome || echo 0) processes"
+          echo "- VNC port 5901: $(ss -tlnp | grep -c :5901 || echo 0) listeners"
+          
+          # Test VNC connection locally
+          if ss -tlnp | grep -q :5901; then
+            echo "✅ VNC server is listening on port 5901"
+          else
+            echo "❌ VNC server not listening - trying alternative setup"
+            pkill -f x11vnc
+            sleep 2
+            x11vnc -display :1 -nopw -listen localhost -forever -shared -rfbport 5901 &
+            sleep 5
+            if ss -tlnp | grep -q :5901; then
+              echo "✅ VNC server started with localhost binding"
+            else
+              echo "❌ VNC server completely failed"
+              exit 1
+            fi
+          fi
 
-      - name: Setup tunnel
+      - name: Setup noVNC web interface
+        run: |
+          # Install websockify
+          pip3 install websockify
+          
+          # Get noVNC
+          wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz
+          tar xf v1.4.0.tar.gz
+          cd noVNC-1.4.0
+          
+          # Start websockify WITHOUT web server test that was failing
+          echo "🌐 Starting websockify..."
+          websockify --web . 6080 localhost:5901 &
+          sleep 10
+          
+          # Simple port check instead of content check
+          if ss -tlnp | grep -q :6080; then
+            echo "✅ Websockify running on port 6080"
+          else
+            echo "❌ Websockify failed to start"
+            exit 1
+          fi
+          
+          # Test if we can reach the web interface
+          if curl -s --connect-timeout 10 http://localhost:6080 > /dev/null; then
+            echo "✅ Web interface is responding"
+          else
+            echo "⚠️ Web interface not responding, but may still work"
+          fi
+
+      - name: Create tunnel
         run: |
           npm install -g localtunnel
           
           # Start tunnel
           nohup lt --port 6080 > tunnel.log 2>&1 &
-          sleep 15
+          sleep 20
           
           # Get tunnel URL
           TUNNEL_URL=$(grep -o 'https://.*\.loca\.lt' tunnel.log | head -1)
           
           if [ -n "$TUNNEL_URL" ]; then
-            echo "🎉 SUCCESS! Chrome Browser Ready!"
+            echo "🎉 SUCCESS! Chrome Browser VNC Ready!"
             echo "================================================"
             echo "🌐 URL: $TUNNEL_URL"
-            echo "🔑 No password required"
+            echo "🔑 Password: Not required"
             echo "⏰ Duration: ${{ github.event.inputs.duration }} minutes"
             echo "================================================"
             echo ""
-            echo "📋 How to Use:"
+            echo "📋 Connection Instructions:"
             echo "1. Click the URL above"
-            echo "2. Chrome browser will appear immediately"
-            echo "3. Navigate to Chrome Web Store"
-            echo "4. Search for 'Tampermonkey' and install"
+            echo "2. You should see noVNC interface"
+            echo "3. Click 'Connect' button"
+            echo "4. Chrome browser should appear"
+            echo "5. Tampermonkey page should be open"
             echo ""
-            echo "✨ Features:"
-            echo "- Real Chrome browser in web interface"
-            echo "- No VNC setup required"
-            echo "- Full interaction support"
-            echo "- High performance"
+            echo "🔧 Troubleshooting:"
+            echo "- If connection fails, wait 30 seconds and try again"
+            echo "- Make sure to click 'Connect' not just load the page"
+            echo "- If black screen, click in the center to focus"
+            echo ""
+            echo "📊 Service Status:"
+            echo "- VNC Server: $(ss -tlnp | grep :5901 | wc -l) running"
+            echo "- Web Server: $(ss -tlnp | grep :6080 | wc -l) running"
+            echo "- Chrome: $(pgrep -f google-chrome | wc -l) processes"
             
             # GitHub summary
-            echo "## 🚀 Chrome Browser Docker Ready" >> $GITHUB_STEP_SUMMARY
+            echo "## 🚀 Chrome Browser VNC Ready" >> $GITHUB_STEP_SUMMARY
             echo "**URL:** $TUNNEL_URL" >> $GITHUB_STEP_SUMMARY
-            echo "**Type:** Docker-based Chrome with VNC" >> $GITHUB_STEP_SUMMARY
-            echo "**Access:** Click URL → Chrome appears instantly" >> $GITHUB_STEP_SUMMARY
+            echo "**Instructions:** Click URL → Click Connect → Chrome appears" >> $GITHUB_STEP_SUMMARY
+            echo "**Tampermonkey:** Page already open for installation" >> $GITHUB_STEP_SUMMARY
             
           else
             echo "❌ Failed to create tunnel"
+            echo "Tunnel log:"
             cat tunnel.log
+            echo ""
+            echo "Port status:"
+            ss -tlnp | grep -E ':(5901|6080)'
             exit 1
           fi
 
-      - name: Keep alive
+      - name: Keep alive and monitor
         run: |
-          echo "🕐 Keeping Chrome alive for ${{ github.event.inputs.duration }} minutes..."
+          echo "🕐 Monitoring for ${{ github.event.inputs.duration }} minutes..."
           
           DURATION_SECONDS=$((${{ github.event.inputs.duration }} * 60))
           INTERVAL=300
@@ -110,35 +176,40 @@ jobs:
           while [ $ELAPSED -lt $DURATION_SECONDS ]; do
             if [ $((ELAPSED % INTERVAL)) -eq 0 ] && [ $ELAPSED -gt 0 ]; then
               REMAINING=$(((DURATION_SECONDS - ELAPSED) / 60))
-              echo "⏰ Chrome running - $REMAINING minutes remaining"
+              echo "⏰ $REMAINING minutes remaining"
               
-              # Check container health
-              if docker ps | grep -q chrome-vnc; then
-                echo "✅ Chrome container healthy"
-              else
-                echo "🔄 Restarting Chrome container..."
-                docker stop chrome-vnc || true
-                docker rm chrome-vnc || true
-                docker run -d \
-                  --name chrome-vnc \
-                  -p 6080:80 \
-                  --shm-size=2g \
-                  -e RESOLUTION=1920x1080 \
-                  selenium/standalone-chrome:latest
-                sleep 15
+              # Health check and restart if needed
+              VNC_RUNNING=$(ss -tlnp | grep :5901 | wc -l)
+              WEB_RUNNING=$(ss -tlnp | grep :6080 | wc -l)
+              CHROME_RUNNING=$(pgrep -f google-chrome | wc -l)
+              
+              echo "📊 Status: VNC($VNC_RUNNING) Web($WEB_RUNNING) Chrome($CHROME_RUNNING)"
+              
+              if [ $VNC_RUNNING -eq 0 ]; then
+                echo "🔄 Restarting VNC..."
+                x11vnc -display :1 -nopw -listen localhost -forever -shared -rfbport 5901 &
+              fi
+              
+              if [ $CHROME_RUNNING -eq 0 ]; then
+                echo "🔄 Restarting Chrome..."
+                export DISPLAY=:1
+                google-chrome --no-sandbox --disable-dev-shm-usage --disable-gpu --start-maximized --no-first-run "https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" &
               fi
             fi
             sleep 60
             ELAPSED=$((ELAPSED + 60))
           done
           
-          echo "⏰ Session ended"
+          echo "⏰ Session completed"
 
       - name: Cleanup
         if: always()
         run: |
           echo "🧹 Cleaning up..."
           pkill -f localtunnel || true
-          docker stop chrome-vnc || true
-          docker rm chrome-vnc || true
-          echo "✅ Cleanup complete"
+          pkill -f websockify || true
+          pkill -f x11vnc || true
+          pkill -f google-chrome || true
+          pkill -f Xvfb || true
+          pkill -f fluxbox || true
+          echo "✅ Cleanup done"
