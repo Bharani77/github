@@ -1,4 +1,4 @@
-name: Expose SSH via Wetty + LocalTunnel
+name: Expose SSH via Web Terminal + LocalTunnel
 on:
   workflow_dispatch:
     inputs:
@@ -15,7 +15,7 @@ on:
 jobs:
   expose-ssh-web:
     runs-on: ubuntu-latest
-    timeout-minutes: 120  # Maximum runtime protection
+    timeout-minutes: 120
     steps:
       - name: Install required packages
         run: |
@@ -24,81 +24,138 @@ jobs:
           sudo systemctl start ssh
           sudo systemctl enable ssh
 
-      - name: Create new user
+      - name: Create SSH user
         run: |
           sudo useradd -m -s /bin/bash sshuser
           echo "sshuser:${{ github.event.inputs.password }}" | sudo chpasswd
-          # Add user to sudo group if needed
-          # sudo usermod -aG sudo sshuser
+          sudo usermod -aG sudo sshuser
+          echo "✅ Created user 'sshuser' with sudo privileges"
 
-      - name: Install Wetty and LocalTunnel
+      - name: Install and configure ttyd (Web Terminal)
         run: |
-          sudo npm install -g wetty localtunnel
+          # Download ttyd (more reliable than wetty for this use case)
+          wget -q https://github.com/tsl0922/ttyd/releases/download/1.7.3/ttyd.x86_64
+          chmod +x ttyd.x86_64
+          sudo mv ttyd.x86_64 /usr/local/bin/ttyd
+          echo "✅ ttyd installed successfully"
 
-      - name: Start Wetty server
+      - name: Install LocalTunnel
         run: |
-          # Start Wetty with proper configuration
-          wetty --port 3000 --host 0.0.0.0 --ssh-host localhost --ssh-user sshuser --title "GitHub Actions SSH" > wetty.log 2>&1 &
+          sudo npm install -g localtunnel
+          echo "✅ LocalTunnel installed"
+
+      - name: Start Web Terminal
+        run: |
+          # Start ttyd with login shell
+          nohup ttyd -p 3000 -i 0.0.0.0 -t titleFixed=GitHub-Actions-SSH -t fontSize=16 login > ttyd.log 2>&1 &
           sleep 5
           
-          # Check if Wetty is running
-          if pgrep -f wetty > /dev/null; then
-            echo "✅ Wetty server started successfully on port 3000"
+          # Check if ttyd is running
+          if pgrep -f ttyd > /dev/null; then
+            echo "✅ ttyd server started on port 3000"
             # Test local connection
-            curl -s http://localhost:3000 > /dev/null && echo "✅ Wetty responding locally" || echo "⚠️  Wetty not responding locally"
+            if curl -s http://localhost:3000 | grep -q "ttyd"; then
+              echo "✅ ttyd responding correctly"
+            else
+              echo "⚠️ ttyd may not be responding properly"
+              echo "ttyd log:"
+              cat ttyd.log
+            fi
           else
-            echo "❌ Failed to start Wetty server"
-            cat wetty.log
+            echo "❌ Failed to start ttyd"
+            cat ttyd.log
             exit 1
           fi
 
-      - name: Start LocalTunnel and capture URL
+      - name: Start LocalTunnel
         run: |
-          # Start LocalTunnel without fixed subdomain to avoid conflicts
-          lt --port 3000 > lt.log 2>&1 &
+          # Start LocalTunnel
+          nohup lt --port 3000 > lt.log 2>&1 &
           sleep 10
           
-          # Extract and display the URL
-          TUNNEL_URL=$(grep -o 'https://.*\.loca\.lt' lt.log | head -1)
+          # Extract URL with multiple attempts
+          for i in {1..5}; do
+            TUNNEL_URL=$(grep -o 'https://.*\.loca\.lt' lt.log | head -1)
+            if [ -n "$TUNNEL_URL" ]; then
+              break
+            fi
+            echo "Attempt $i: Waiting for LocalTunnel URL..."
+            sleep 5
+          done
+          
           if [ -n "$TUNNEL_URL" ]; then
-            echo "🌐 SSH Web Terminal is available at: $TUNNEL_URL"
-            echo "🌐 Direct terminal access: $TUNNEL_URL/wetty"
+            echo "🎉 SUCCESS! Web Terminal is ready!"
+            echo "=================================="
+            echo "🌐 URL: $TUNNEL_URL"
             echo "👤 Username: sshuser"
-            echo "🔑 Password: [as provided in workflow input]"
-            echo "⏰ Will stay alive for ${{ github.event.inputs.duration }} minutes"
+            echo "🔑 Password: [your provided password]"
+            echo "⏰ Duration: ${{ github.event.inputs.duration }} minutes"
+            echo "=================================="
             echo ""
-            echo "📋 IMPORTANT: To bypass LocalTunnel's reminder page, use ONE of these methods:"
-            echo "   Method 1: Add header 'bypass-tunnel-reminder: true' to your browser requests"
-            echo "   Method 2: Set a custom User-Agent like 'MyCustomAgent/1.0'"
-            echo "   Method 3: Use curl: curl -H 'bypass-tunnel-reminder: true' $TUNNEL_URL"
+            echo "📋 To bypass LocalTunnel reminder:"
+            echo "   • Add header: bypass-tunnel-reminder: true"
+            echo "   • Or use custom User-Agent"
+            echo "   • Browser extension: ModHeader (recommended)"
+            echo ""
+            echo "🔧 Test command:"
+            echo "curl -H 'bypass-tunnel-reminder: true' $TUNNEL_URL"
             
-            # Also write to step summary for easy access
-            echo "## 🚀 SSH Web Terminal Ready" >> $GITHUB_STEP_SUMMARY
-            echo "**Main URL:** $TUNNEL_URL" >> $GITHUB_STEP_SUMMARY
-            echo "**Terminal URL:** $TUNNEL_URL/wetty" >> $GITHUB_STEP_SUMMARY
-            echo "**Username:** sshuser" >> $GITHUB_STEP_SUMMARY
-            echo "**Duration:** ${{ github.event.inputs.duration }} minutes" >> $GITHUB_STEP_SUMMARY
+            # Write to GitHub step summary
+            echo "## 🚀 Web SSH Terminal Ready" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### 🔧 Bypass LocalTunnel Reminder:" >> $GITHUB_STEP_SUMMARY
+            echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| **URL** | $TUNNEL_URL |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Username** | sshuser |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Duration** | ${{ github.event.inputs.duration }} minutes |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🔧 Bypass Reminder Instructions:" >> $GITHUB_STEP_SUMMARY
+            echo "- Install **ModHeader** browser extension" >> $GITHUB_STEP_SUMMARY
             echo "- Add header: \`bypass-tunnel-reminder: true\`" >> $GITHUB_STEP_SUMMARY
-            echo "- Or use custom User-Agent: \`MyCustomAgent/1.0\`" >> $GITHUB_STEP_SUMMARY
-            echo "- Browser extensions like ModHeader can help set custom headers" >> $GITHUB_STEP_SUMMARY
+            echo "- Or set custom User-Agent: \`MyBrowser/1.0\`" >> $GITHUB_STEP_SUMMARY
+            
+            # Test the tunnel
+            echo ""
+            echo "🧪 Testing tunnel connectivity..."
+            if curl -s -H "bypass-tunnel-reminder: true" "$TUNNEL_URL" | grep -q "ttyd"; then
+              echo "✅ Tunnel is working correctly!"
+            else
+              echo "⚠️ Tunnel test inconclusive - but should work in browser"
+            fi
+            
           else
             echo "❌ Failed to get LocalTunnel URL"
+            echo "LocalTunnel log:"
             cat lt.log
             exit 1
           fi
 
-      - name: Keep tunnel alive
+      - name: Keep session alive
         run: |
-          echo "Keeping tunnel alive for ${{ github.event.inputs.duration }} minutes..."
-          sleep $((${{ github.event.inputs.duration }} * 60))
-          echo "Tunnel session ended."
+          echo "🕐 Keeping session alive for ${{ github.event.inputs.duration }} minutes..."
+          echo "Press Ctrl+C in the Actions tab to stop early"
+          
+          # Keep alive with periodic status updates
+          DURATION_SECONDS=$((${{ github.event.inputs.duration }} * 60))
+          INTERVAL=300  # 5 minutes
+          ELAPSED=0
+          
+          while [ $ELAPSED -lt $DURATION_SECONDS ]; do
+            if [ $((ELAPSED % INTERVAL)) -eq 0 ] && [ $ELAPSED -gt 0 ]; then
+              REMAINING=$(((DURATION_SECONDS - ELAPSED) / 60))
+              echo "⏰ Still alive - $REMAINING minutes remaining"
+            fi
+            sleep 60
+            ELAPSED=$((ELAPSED + 60))
+          done
+          
+          echo "⏰ Session time expired. Shutting down..."
 
-      - name: Cleanup (runs even if job is cancelled)
+      - name: Cleanup
         if: always()
         run: |
-          echo "Cleaning up processes..."
-          pkill -f wetty || true
+          echo "🧹 Cleaning up..."
+          pkill -f ttyd || true
           pkill -f localtunnel || true
-          sudo userdel -r sshuser || true
+          sudo userdel -r sshuser 2>/dev/null || true
+          echo "✅ Cleanup completed"
