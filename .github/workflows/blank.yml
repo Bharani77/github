@@ -20,16 +20,117 @@ jobs:
       - name: Install required packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y openssh-server nodejs npm
+          sudo apt-get install -y openssh-server nodejs npm wget curl gnupg2 software-properties-common
+          
+          # Install GUI components
+          sudo apt-get install -y xvfb x11vnc fluxbox xterm
+          
+          # Install Google Chrome
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+          
+          # Install additional tools
+          sudo apt-get install -y unzip firefox-esr
+          
           sudo systemctl start ssh
           sudo systemctl enable ssh
+          echo "✅ Installed Chrome, GUI components, and SSH server"
 
       - name: Create SSH user
         run: |
           sudo useradd -m -s /bin/bash sshuser
           echo "sshuser:${{ github.event.inputs.password }}" | sudo chpasswd
           sudo usermod -aG sudo sshuser
-          echo "✅ Created user 'sshuser' with sudo privileges"
+          
+          # Set up user environment for GUI
+          sudo mkdir -p /home/sshuser/.config/google-chrome
+          sudo mkdir -p /home/sshuser/Downloads
+          
+          # Create startup script for GUI
+          cat << 'EOF' | sudo tee /home/sshuser/start-gui.sh
+#!/bin/bash
+export DISPLAY=:1
+# Start virtual display
+Xvfb :1 -screen 0 1920x1080x24 > /dev/null 2>&1 &
+sleep 2
+# Start window manager
+fluxbox > /dev/null 2>&1 &
+sleep 1
+echo "GUI environment started on DISPLAY=:1"
+echo "Starting Chrome browser..."
+google-chrome --no-sandbox --disable-dev-shm-usage --disable-gpu --remote-debugging-port=9222 > /dev/null 2>&1 &
+echo "Chrome started successfully!"
+echo ""
+echo "Available commands:"
+echo "  chrome          - Start Chrome browser"
+echo "  firefox         - Start Firefox browser"  
+echo "  pkill chrome    - Close Chrome"
+echo "  pkill firefox   - Close Firefox"
+echo ""
+EOF
+          
+          sudo chmod +x /home/sshuser/start-gui.sh
+          sudo chown -R sshuser:sshuser /home/sshuser
+          echo "✅ Created user 'sshuser' with GUI environment setup"
+
+      - name: Install Tampermonkey Extension
+        run: |
+          # Download Tampermonkey extension
+          wget -q https://clients2.google.com/service/update2/crx?response=redirect&prodversion=114.0.0.0&acceptformat=crx2,crx3&x=id%3Ddhdgffkkebhmkfjojejmpbldmpobfkfo%26uc -O tampermonkey.crx
+          
+          # Create extension directory
+          sudo mkdir -p /home/sshuser/.config/google-chrome/Default/Extensions
+          
+          # Create Chrome preferences to install Tampermonkey
+          cat << 'EOF' | sudo tee /home/sshuser/.config/google-chrome/Default/Preferences
+{
+   "extensions": {
+      "settings": {
+         "dhdgffkkebhmkfjojejmpbldmpobfkfo": {
+            "active_permissions": {
+               "api": [ "activeTab", "cookies", "tabs", "unlimitedStorage", "storage", "contextMenus", "webRequest", "webRequestBlocking" ],
+               "explicit_host": [ "http://*/*", "https://*/*", "file:///*" ]
+            },
+            "creation_flags": 1,
+            "from_webstore": true,
+            "install_time": "13318864540000000",
+            "location": 1,
+            "manifest": {
+               "background": {
+                  "scripts": [ "background.js" ]
+               },
+               "content_scripts": [ {
+                  "js": [ "content.js" ],
+                  "matches": [ "http://*/*", "https://*/*", "file:///*" ],
+                  "run_at": "document_start"
+               } ],
+               "description": "The most popular userscript manager",
+               "homepage_url": "https://tampermonkey.net",
+               "icons": {
+                  "16": "images/icon16.png",
+                  "32": "images/icon32.png",
+                  "48": "images/icon48.png",
+                  "128": "images/icon128.png"
+               },
+               "manifest_version": 2,
+               "name": "Tampermonkey",
+               "permissions": [ "unlimitedStorage", "tabs", "idle", "notifications", "contextMenus", "cookies", "downloads", "clipboardWrite", "storage", "webRequest", "webRequestBlocking", "nativeMessaging", "background", "http://*/*", "https://*/*", "file:///*" ],
+               "version": "4.19.0"
+            },
+            "path": "dhdgffkkebhmkfjojejmpbldmpobfkfo/4.19.0_0",
+            "state": 1,
+            "was_installed_by_default": false,
+            "was_installed_by_oem": false
+         }
+      }
+   }
+}
+EOF
+          
+          sudo chown -R sshuser:sshuser /home/sshuser/.config
+          echo "✅ Tampermonkey extension configured for Chrome"
 
       - name: Install and configure ttyd (Web Terminal)
         run: |
@@ -39,12 +140,17 @@ jobs:
           sudo mv ttyd.x86_64 /usr/local/bin/ttyd
           echo "✅ ttyd installed successfully"
 
+      - name: Start GUI Environment
+        run: |
+          # Start GUI environment as sshuser
+          sudo -u sshuser bash -c "cd /home/sshuser && ./start-gui.sh" &
+          sleep 5
+          echo "✅ GUI environment initialized"
+
       - name: Install LocalTunnel
         run: |
           sudo npm install -g localtunnel
           echo "✅ LocalTunnel installed"
-
-      - name: Start Web Terminal
         run: |
           # Start ttyd with direct bash shell (no login required)
           nohup ttyd -p 3000 -i 0.0.0.0 -t titleFixed=GitHub-Actions-SSH -t fontSize=16 -c sshuser:${{ github.event.inputs.password }} bash > ttyd.log 2>&1 &
@@ -84,30 +190,53 @@ jobs:
           done
           
           if [ -n "$TUNNEL_URL" ]; then
-            echo "🎉 SUCCESS! Web Terminal is ready!"
-            echo "=================================="
+            echo "🎉 SUCCESS! Web Terminal with Chrome Browser is ready!"
+            echo "========================================================="
             echo "🌐 URL: $TUNNEL_URL"
             echo "👤 Username: sshuser"
             echo "🔑 Password: [your provided password]"
             echo "⏰ Duration: ${{ github.event.inputs.duration }} minutes"
-            echo "=================================="
+            echo "========================================================="
+            echo ""
+            echo "🚀 GETTING STARTED:"
+            echo "1. Access the terminal via the URL above"
+            echo "2. Login with sshuser and your password"
+            echo "3. The GUI environment is already running!"
+            echo ""
+            echo "🌐 BROWSER COMMANDS:"
+            echo "   chrome              - Start Chrome with Tampermonkey"
+            echo "   firefox             - Start Firefox browser"
+            echo "   pkill chrome        - Close Chrome"
+            echo "   pkill firefox       - Close Firefox"
             echo ""
             echo "📋 To bypass LocalTunnel reminder:"
             echo "   • Add header: bypass-tunnel-reminder: true"
             echo "   • Or use custom User-Agent"
             echo "   • Browser extension: ModHeader (recommended)"
             echo ""
+            echo "✨ FEATURES INCLUDED:"
+            echo "   ✅ Google Chrome with Tampermonkey extension"
+            echo "   ✅ Firefox browser"
+            echo "   ✅ Full GUI environment (Fluxbox)"
+            echo "   ✅ Virtual display (1920x1080)"
+            echo "   ✅ Sudo access for package installation"
+            echo ""
             echo "🔧 Test command:"
             echo "curl -H 'bypass-tunnel-reminder: true' $TUNNEL_URL"
             
             # Write to GitHub step summary
-            echo "## 🚀 Web SSH Terminal Ready" >> $GITHUB_STEP_SUMMARY
+            echo "## 🚀 Web SSH Terminal with Chrome Browser Ready" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
             echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
             echo "| **URL** | $TUNNEL_URL |" >> $GITHUB_STEP_SUMMARY
             echo "| **Username** | sshuser |" >> $GITHUB_STEP_SUMMARY
             echo "| **Duration** | ${{ github.event.inputs.duration }} minutes |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🌐 Browser Commands:" >> $GITHUB_STEP_SUMMARY
+            echo "- \`chrome\` - Start Chrome with Tampermonkey" >> $GITHUB_STEP_SUMMARY
+            echo "- \`firefox\` - Start Firefox browser" >> $GITHUB_STEP_SUMMARY
+            echo "- \`pkill chrome\` - Close Chrome" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### 🔧 Bypass Reminder Instructions:" >> $GITHUB_STEP_SUMMARY
             echo "- Install **ModHeader** browser extension" >> $GITHUB_STEP_SUMMARY
