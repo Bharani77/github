@@ -64,11 +64,28 @@ jobs:
           echo "Chrome started successfully!"
           echo ""
           echo "Available commands:"
-          echo "  chrome          - Start Chrome browser"
-          echo "  firefox         - Start Firefox browser"  
+          echo "  chrome          - Start Chrome browser (GUI mode)"
+          echo "  chrome-headless - Start Chrome in headless mode"
+          echo "  firefox         - Start Firefox browser (GUI mode)"
           echo "  pkill chrome    - Close Chrome"
           echo "  pkill firefox   - Close Firefox"
+          echo "  x11vnc          - Start VNC server to view GUI remotely"
           echo ""
+          
+          # Create Chrome launcher commands
+          echo '#!/bin/bash' > /home/sshuser/chrome
+          echo 'export DISPLAY=:1' >> /home/sshuser/chrome
+          echo 'google-chrome --no-sandbox --disable-dev-shm-usage --disable-gpu --remote-debugging-port=9222 "$@" &' >> /home/sshuser/chrome
+          chmod +x /home/sshuser/chrome
+          
+          echo '#!/bin/bash' > /home/sshuser/chrome-headless
+          echo 'google-chrome --headless --no-sandbox --disable-dev-shm-usage --disable-gpu --remote-debugging-port=9222 "$@" &' >> /home/sshuser/chrome-headless
+          chmod +x /home/sshuser/chrome-headless
+          
+          echo '#!/bin/bash' > /home/sshuser/firefox
+          echo 'export DISPLAY=:1' >> /home/sshuser/firefox
+          echo 'firefox "$@" &' >> /home/sshuser/firefox
+          chmod +x /home/sshuser/firefox
           EOF
           
           sudo chmod +x /home/sshuser/start-gui.sh
@@ -171,10 +188,12 @@ jobs:
             echo "3. The GUI environment is already running!"
             echo ""
             echo "🌐 BROWSER COMMANDS:"
-            echo "   chrome              - Start Chrome with Tampermonkey"
-            echo "   firefox             - Start Firefox browser"
+            echo "   chrome              - Start Chrome in GUI mode"
+            echo "   chrome-headless     - Start Chrome in headless mode"
+            echo "   firefox             - Start Firefox in GUI mode"
             echo "   pkill chrome        - Close Chrome"
             echo "   pkill firefox       - Close Firefox"
+            echo "   x11vnc -display :1  - Start VNC server to view GUI"
             echo ""
             echo "📋 To bypass LocalTunnel reminder:"
             echo "   • Add header: bypass-tunnel-reminder: true"
@@ -201,9 +220,11 @@ jobs:
             echo "| **Duration** | ${{ github.event.inputs.duration }} minutes |" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### 🌐 Browser Commands:" >> $GITHUB_STEP_SUMMARY
-            echo "- \`chrome\` - Start Chrome with Tampermonkey" >> $GITHUB_STEP_SUMMARY
-            echo "- \`firefox\` - Start Firefox browser" >> $GITHUB_STEP_SUMMARY
+            echo "- \`chrome\` - Start Chrome in GUI mode" >> $GITHUB_STEP_SUMMARY
+            echo "- \`chrome-headless\` - Start Chrome in headless mode" >> $GITHUB_STEP_SUMMARY
+            echo "- \`firefox\` - Start Firefox in GUI mode" >> $GITHUB_STEP_SUMMARY
             echo "- \`pkill chrome\` - Close Chrome" >> $GITHUB_STEP_SUMMARY
+            echo "- \`x11vnc -display :1\` - Start VNC server for remote GUI access" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### 🔧 Bypass Reminder Instructions:" >> $GITHUB_STEP_SUMMARY
             echo "- Install **ModHeader** browser extension" >> $GITHUB_STEP_SUMMARY
