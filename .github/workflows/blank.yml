@@ -37,9 +37,20 @@ jobs:
 
       - name: Start Wetty server
         run: |
-          wetty --port 3000 --ssh-user sshuser > wetty.log 2>&1 &
+          # Start Wetty with proper configuration
+          wetty --port 3000 --host 0.0.0.0 --ssh-host localhost --ssh-user sshuser --title "GitHub Actions SSH" > wetty.log 2>&1 &
           sleep 5
-          echo "Wetty server started on port 3000"
+          
+          # Check if Wetty is running
+          if pgrep -f wetty > /dev/null; then
+            echo "✅ Wetty server started successfully on port 3000"
+            # Test local connection
+            curl -s http://localhost:3000 > /dev/null && echo "✅ Wetty responding locally" || echo "⚠️  Wetty not responding locally"
+          else
+            echo "❌ Failed to start Wetty server"
+            cat wetty.log
+            exit 1
+          fi
 
       - name: Start LocalTunnel and capture URL
         run: |
@@ -51,15 +62,27 @@ jobs:
           TUNNEL_URL=$(grep -o 'https://.*\.loca\.lt' lt.log | head -1)
           if [ -n "$TUNNEL_URL" ]; then
             echo "🌐 SSH Web Terminal is available at: $TUNNEL_URL"
+            echo "🌐 Direct terminal access: $TUNNEL_URL/wetty"
             echo "👤 Username: sshuser"
             echo "🔑 Password: [as provided in workflow input]"
             echo "⏰ Will stay alive for ${{ github.event.inputs.duration }} minutes"
+            echo ""
+            echo "📋 IMPORTANT: To bypass LocalTunnel's reminder page, use ONE of these methods:"
+            echo "   Method 1: Add header 'bypass-tunnel-reminder: true' to your browser requests"
+            echo "   Method 2: Set a custom User-Agent like 'MyCustomAgent/1.0'"
+            echo "   Method 3: Use curl: curl -H 'bypass-tunnel-reminder: true' $TUNNEL_URL"
             
             # Also write to step summary for easy access
             echo "## 🚀 SSH Web Terminal Ready" >> $GITHUB_STEP_SUMMARY
-            echo "**URL:** $TUNNEL_URL" >> $GITHUB_STEP_SUMMARY
+            echo "**Main URL:** $TUNNEL_URL" >> $GITHUB_STEP_SUMMARY
+            echo "**Terminal URL:** $TUNNEL_URL/wetty" >> $GITHUB_STEP_SUMMARY
             echo "**Username:** sshuser" >> $GITHUB_STEP_SUMMARY
             echo "**Duration:** ${{ github.event.inputs.duration }} minutes" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🔧 Bypass LocalTunnel Reminder:" >> $GITHUB_STEP_SUMMARY
+            echo "- Add header: \`bypass-tunnel-reminder: true\`" >> $GITHUB_STEP_SUMMARY
+            echo "- Or use custom User-Agent: \`MyCustomAgent/1.0\`" >> $GITHUB_STEP_SUMMARY
+            echo "- Browser extensions like ModHeader can help set custom headers" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ Failed to get LocalTunnel URL"
             cat lt.log
