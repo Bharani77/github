@@ -1,0 +1,45 @@
+name: Expose SSH via Wetty + LocalTunnel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  expose-ssh-web:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install required packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server nodejs npm
+          sudo systemctl start ssh
+          sudo systemctl enable ssh
+
+      - name: Create new user
+        run: |
+          sudo useradd -m -s /bin/bash newuser
+          echo "newuser:newpassword" | sudo chpasswd
+
+      - name: Install Wetty globally
+        run: sudo npm install -g wetty
+
+      - name: Start Wetty server
+        run: |
+          nohup wetty --port 3000 > wetty.log 2>&1 &
+          sleep 5
+
+      - name: Install LocalTunnel globally
+        run: sudo npm install -g localtunnel
+
+      - name: Start LocalTunnel and output URL
+        id: localtunnel
+        run: |
+          URL=$(lt --port 3000 --print-requests --subdomain ghactionswetty || lt --port 3000 --print-requests)
+          echo "lt_url=$URL" >> $GITHUB_OUTPUT
+          echo "LocalTunnel URL: $URL"
+          # Keep LocalTunnel running in background for workflow duration
+          nohup lt --port 3000 --print-requests --subdomain ghactionswetty > lt.log 2>&1 &
+          sleep 5
+
+      - name: Show LocalTunnel URL
+        run: echo "Open your browser at: ${{ steps.localtunnel.outputs.lt_url }}"
