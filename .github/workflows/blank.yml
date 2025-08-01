@@ -46,8 +46,8 @@ jobs:
 
       - name: Start Web Terminal
         run: |
-          # Start ttyd with login shell
-          nohup ttyd -p 3000 -i 0.0.0.0 -t titleFixed=GitHub-Actions-SSH -t fontSize=16 login > ttyd.log 2>&1 &
+          # Start ttyd with direct bash shell (no login required)
+          nohup ttyd -p 3000 -i 0.0.0.0 -t titleFixed=GitHub-Actions-SSH -t fontSize=16 -c sshuser:${{ github.event.inputs.password }} bash > ttyd.log 2>&1 &
           sleep 5
           
           # Check if ttyd is running
