@@ -1,12 +1,21 @@
 name: Expose SSH via Wetty + LocalTunnel
-
 on:
   workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Duration to keep tunnel alive (minutes)'
+        required: true
+        default: '60'
+        type: string
+      password:
+        description: 'Password for SSH user'
+        required: true
+        type: string
 
 jobs:
   expose-ssh-web:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 120  # Maximum runtime protection
     steps:
       - name: Install required packages
         run: |
@@ -17,22 +26,56 @@ jobs:
 
       - name: Create new user
         run: |
-          sudo useradd -m -s /bin/bash newuser
-          echo "newuser:newpassword" | sudo chpasswd
+          sudo useradd -m -s /bin/bash sshuser
+          echo "sshuser:${{ github.event.inputs.password }}" | sudo chpasswd
+          # Add user to sudo group if needed
+          # sudo usermod -aG sudo sshuser
 
-      - name: Install Wetty globally
-        run: sudo npm install -g wetty
+      - name: Install Wetty and LocalTunnel
+        run: |
+          sudo npm install -g wetty localtunnel
 
       - name: Start Wetty server
         run: |
-          nohup wetty --port 3000 > wetty.log 2>&1 &
+          wetty --port 3000 --ssh-user sshuser > wetty.log 2>&1 &
           sleep 5
+          echo "Wetty server started on port 3000"
 
-      - name: Install LocalTunnel globally
-        run: sudo npm install -g localtunnel
-
-      - name: Start LocalTunnel
+      - name: Start LocalTunnel and capture URL
         run: |
-          nohup lt --port 3000 --subdomain ghactionswetty > lt.log 2>&1 &
-          sleep 5
-          echo "Open your browser at: https://ghactionswetty.loca.lt"
+          # Start LocalTunnel without fixed subdomain to avoid conflicts
+          lt --port 3000 > lt.log 2>&1 &
+          sleep 10
+          
+          # Extract and display the URL
+          TUNNEL_URL=$(grep -o 'https://.*\.loca\.lt' lt.log | head -1)
+          if [ -n "$TUNNEL_URL" ]; then
+            echo "🌐 SSH Web Terminal is available at: $TUNNEL_URL"
+            echo "👤 Username: sshuser"
+            echo "🔑 Password: [as provided in workflow input]"
+            echo "⏰ Will stay alive for ${{ github.event.inputs.duration }} minutes"
+            
+            # Also write to step summary for easy access
+            echo "## 🚀 SSH Web Terminal Ready" >> $GITHUB_STEP_SUMMARY
+            echo "**URL:** $TUNNEL_URL" >> $GITHUB_STEP_SUMMARY
+            echo "**Username:** sshuser" >> $GITHUB_STEP_SUMMARY
+            echo "**Duration:** ${{ github.event.inputs.duration }} minutes" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Failed to get LocalTunnel URL"
+            cat lt.log
+            exit 1
+          fi
+
+      - name: Keep tunnel alive
+        run: |
+          echo "Keeping tunnel alive for ${{ github.event.inputs.duration }} minutes..."
+          sleep $((${{ github.event.inputs.duration }} * 60))
+          echo "Tunnel session ended."
+
+      - name: Cleanup (runs even if job is cancelled)
+        if: always()
+        run: |
+          echo "Cleaning up processes..."
+          pkill -f wetty || true
+          pkill -f localtunnel || true
+          sudo userdel -r sshuser || true
