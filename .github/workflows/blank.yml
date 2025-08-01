@@ -1,4 +1,4 @@
-name: Chrome Browser - VNC Fixed
+name: Vivaldi Browser - VNC with Tampermonkey
 on:
   workflow_dispatch:
     inputs:
@@ -9,7 +9,7 @@ on:
         type: string
 
 jobs:
-  chrome-vnc:
+  vivaldi-vnc:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -18,16 +18,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y wget curl nodejs npm python3-pip
           
-          # Install Chrome
-          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          # Install Vivaldi browser
+          echo "🌐 Installing Vivaldi browser..."
+          wget -qO- https://repo.vivaldi.com/archive/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/vivaldi-browser.gpg
+          echo "deb [signed-by=/usr/share/keyrings/vivaldi-browser.gpg arch=amd64,armhf] https://repo.vivaldi.com/archive/deb/ stable main" | sudo tee /etc/apt/sources.list.d/vivaldi-archive.list
           sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
+          sudo apt-get install -y vivaldi-stable
           
           # Install X11 and VNC
           sudo apt-get install -y xvfb x11vnc fluxbox
           
-          echo "✅ Environment ready"
+          echo "✅ Vivaldi and environment ready"
 
       - name: Start services step by step
         run: |
@@ -42,15 +43,18 @@ jobs:
           fluxbox &
           sleep 3
           
-          # Step 3: Start Chrome
-          echo "🌐 Starting Chrome..."
-          google-chrome \
+          # Step 3: Start Vivaldi with Tampermonkey page
+          echo "🌐 Starting Vivaldi browser..."
+          vivaldi-stable \
             --no-sandbox \
             --disable-dev-shm-usage \
             --disable-gpu \
             --start-maximized \
             --no-first-run \
             --disable-default-apps \
+            --disable-background-timer-throttling \
+            --disable-backgrounding-occluded-windows \
+            --disable-renderer-backgrounding \
             "https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" &
           sleep 10
           
@@ -63,7 +67,7 @@ jobs:
           echo "🔍 Checking services..."
           echo "- Display :1: $(ps aux | grep -c 'Xvfb :1' || echo 0) processes"
           echo "- Fluxbox: $(ps aux | grep -c fluxbox || echo 0) processes"  
-          echo "- Chrome: $(ps aux | grep -c google-chrome || echo 0) processes"
+          echo "- Vivaldi: $(ps aux | grep -c vivaldi-stable || echo 0) processes"
           echo "- VNC port 5901: $(ss -tlnp | grep -c :5901 || echo 0) listeners"
           
           # Test VNC connection locally
@@ -93,12 +97,12 @@ jobs:
           tar xf v1.4.0.tar.gz
           cd noVNC-1.4.0
           
-          # Start websockify WITHOUT web server test that was failing
+          # Start websockify
           echo "🌐 Starting websockify..."
           websockify --web . 6080 localhost:5901 &
           sleep 10
           
-          # Simple port check instead of content check
+          # Simple port check
           if ss -tlnp | grep -q :6080; then
             echo "✅ Websockify running on port 6080"
           else
@@ -125,7 +129,7 @@ jobs:
           TUNNEL_URL=$(grep -o 'https://.*\.loca\.lt' tunnel.log | head -1)
           
           if [ -n "$TUNNEL_URL" ]; then
-            echo "🎉 SUCCESS! Chrome Browser VNC Ready!"
+            echo "🎉 SUCCESS! Vivaldi Browser VNC Ready!"
             echo "================================================"
             echo "🌐 URL: $TUNNEL_URL"
             echo "🔑 Password: Not required"
@@ -136,8 +140,15 @@ jobs:
             echo "1. Click the URL above"
             echo "2. You should see noVNC interface"
             echo "3. Click 'Connect' button"
-            echo "4. Chrome browser should appear"
-            echo "5. Tampermonkey page should be open"
+            echo "4. Vivaldi browser will appear"
+            echo "5. Tampermonkey installation page is already open"
+            echo "6. Click 'Add to Chrome' to install Tampermonkey"
+            echo ""
+            echo "🔧 About Vivaldi + Tampermonkey:"
+            echo "- Vivaldi is Chromium-based, so Chrome Web Store works"
+            echo "- Tampermonkey installs just like in Chrome"
+            echo "- All Chrome extensions are compatible"
+            echo "- Vivaldi has built-in ad blocker and more features"
             echo ""
             echo "🔧 Troubleshooting:"
             echo "- If connection fails, wait 30 seconds and try again"
@@ -147,13 +158,15 @@ jobs:
             echo "📊 Service Status:"
             echo "- VNC Server: $(ss -tlnp | grep :5901 | wc -l) running"
             echo "- Web Server: $(ss -tlnp | grep :6080 | wc -l) running"
-            echo "- Chrome: $(pgrep -f google-chrome | wc -l) processes"
+            echo "- Vivaldi: $(pgrep -f vivaldi-stable | wc -l) processes"
             
             # GitHub summary
-            echo "## 🚀 Chrome Browser VNC Ready" >> $GITHUB_STEP_SUMMARY
+            echo "## 🎭 Vivaldi Browser VNC Ready" >> $GITHUB_STEP_SUMMARY
             echo "**URL:** $TUNNEL_URL" >> $GITHUB_STEP_SUMMARY
-            echo "**Instructions:** Click URL → Click Connect → Chrome appears" >> $GITHUB_STEP_SUMMARY
-            echo "**Tampermonkey:** Page already open for installation" >> $GITHUB_STEP_SUMMARY
+            echo "**Browser:** Vivaldi (Chromium-based)" >> $GITHUB_STEP_SUMMARY
+            echo "**Instructions:** Click URL → Click Connect → Vivaldi appears" >> $GITHUB_STEP_SUMMARY
+            echo "**Tampermonkey:** Chrome Web Store page open for installation" >> $GITHUB_STEP_SUMMARY
+            echo "**Features:** Built-in ad blocker, privacy tools, customizable UI" >> $GITHUB_STEP_SUMMARY
             
           else
             echo "❌ Failed to create tunnel"
@@ -167,7 +180,7 @@ jobs:
 
       - name: Keep alive and monitor
         run: |
-          echo "🕐 Monitoring for ${{ github.event.inputs.duration }} minutes..."
+          echo "🕐 Monitoring Vivaldi session for ${{ github.event.inputs.duration }} minutes..."
           
           DURATION_SECONDS=$((${{ github.event.inputs.duration }} * 60))
           INTERVAL=300
@@ -181,26 +194,32 @@ jobs:
               # Health check and restart if needed
               VNC_RUNNING=$(ss -tlnp | grep :5901 | wc -l)
               WEB_RUNNING=$(ss -tlnp | grep :6080 | wc -l)
-              CHROME_RUNNING=$(pgrep -f google-chrome | wc -l)
+              VIVALDI_RUNNING=$(pgrep -f vivaldi-stable | wc -l)
               
-              echo "📊 Status: VNC($VNC_RUNNING) Web($WEB_RUNNING) Chrome($CHROME_RUNNING)"
+              echo "📊 Status: VNC($VNC_RUNNING) Web($WEB_RUNNING) Vivaldi($VIVALDI_RUNNING)"
               
               if [ $VNC_RUNNING -eq 0 ]; then
                 echo "🔄 Restarting VNC..."
                 x11vnc -display :1 -nopw -listen localhost -forever -shared -rfbport 5901 &
               fi
               
-              if [ $CHROME_RUNNING -eq 0 ]; then
-                echo "🔄 Restarting Chrome..."
+              if [ $VIVALDI_RUNNING -eq 0 ]; then
+                echo "🔄 Restarting Vivaldi..."
                 export DISPLAY=:1
-                google-chrome --no-sandbox --disable-dev-shm-usage --disable-gpu --start-maximized --no-first-run "https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" &
+                vivaldi-stable \
+                  --no-sandbox \
+                  --disable-dev-shm-usage \
+                  --disable-gpu \
+                  --start-maximized \
+                  --no-first-run \
+                  "https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" &
               fi
             fi
             sleep 60
             ELAPSED=$((ELAPSED + 60))
           done
           
-          echo "⏰ Session completed"
+          echo "⏰ Vivaldi session completed"
 
       - name: Cleanup
         if: always()
@@ -209,7 +228,7 @@ jobs:
           pkill -f localtunnel || true
           pkill -f websockify || true
           pkill -f x11vnc || true
-          pkill -f google-chrome || true
+          pkill -f vivaldi-stable || true
           pkill -f Xvfb || true
           pkill -f fluxbox || true
           echo "✅ Cleanup done"
