@@ -77,60 +77,25 @@ jobs:
 
       - name: Install Tampermonkey Extension
         run: |
-          # Download Tampermonkey extension
-          wget -q https://clients2.google.com/service/update2/crx?response=redirect&prodversion=114.0.0.0&acceptformat=crx2,crx3&x=id%3Ddhdgffkkebhmkfjojejmpbldmpobfkfo%26uc -O tampermonkey.crx
-          
           # Create extension directory
           sudo mkdir -p /home/sshuser/.config/google-chrome/Default/Extensions
           
-          # Create Chrome preferences to install Tampermonkey
-          sudo tee /home/sshuser/.config/google-chrome/Default/Preferences > /dev/null << 'EOF'
-          {
-             "extensions": {
-                "settings": {
-                   "dhdgffkkebhmkfjojejmpbldmpobfkfo": {
-                      "active_permissions": {
-                         "api": [ "activeTab", "cookies", "tabs", "unlimitedStorage", "storage", "contextMenus", "webRequest", "webRequestBlocking" ],
-                         "explicit_host": [ "http://*/*", "https://*/*", "file:///*" ]
-                      },
-                      "creation_flags": 1,
-                      "from_webstore": true,
-                      "install_time": "13318864540000000",
-                      "location": 1,
-                      "manifest": {
-                         "background": {
-                            "scripts": [ "background.js" ]
-                         },
-                         "content_scripts": [ {
-                            "js": [ "content.js" ],
-                            "matches": [ "http://*/*", "https://*/*", "file:///*" ],
-                            "run_at": "document_start"
-                         } ],
-                         "description": "The most popular userscript manager",
-                         "homepage_url": "https://tampermonkey.net",
-                         "icons": {
-                            "16": "images/icon16.png",
-                            "32": "images/icon32.png",
-                            "48": "images/icon48.png",
-                            "128": "images/icon128.png"
-                         },
-                         "manifest_version": 2,
-                         "name": "Tampermonkey",
-                         "permissions": [ "unlimitedStorage", "tabs", "idle", "notifications", "contextMenus", "cookies", "downloads", "clipboardWrite", "storage", "webRequest", "webRequestBlocking", "nativeMessaging", "background", "http://*/*", "https://*/*", "file:///*" ],
-                         "version": "4.19.0"
-                      },
-                      "path": "dhdgffkkebhmkfjojejmpbldmpobfkfo/4.19.0_0",
-                      "state": 1,
-                      "was_installed_by_default": false,
-                      "was_installed_by_oem": false
-                   }
-                }
-             }
-          }
+          # Create a script to install Tampermonkey on first Chrome launch
+          sudo tee /home/sshuser/install-tampermonkey.sh > /dev/null << 'EOF'
+          #!/bin/bash
+          echo "To install Tampermonkey:"
+          echo "1. Open Chrome and go to: chrome://extensions/"
+          echo "2. Enable 'Developer mode' (top right toggle)"
+          echo "3. Go to Chrome Web Store: https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo"
+          echo "4. Click 'Add to Chrome'"
+          echo ""
+          echo "Or install via command line:"
+          echo "google-chrome --new-window 'https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo'"
           EOF
           
-          sudo chown -R sshuser:sshuser /home/sshuser/.config
-          echo "✅ Tampermonkey extension configured for Chrome"
+          sudo chmod +x /home/sshuser/install-tampermonkey.sh
+          sudo chown -R sshuser:sshuser /home/sshuser
+          echo "✅ Tampermonkey installation script created"
 
       - name: Install and configure ttyd (Web Terminal)
         run: |
