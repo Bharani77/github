@@ -21,33 +21,21 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y wget curl nodejs npm
-          
-          # Install Chrome
           wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
           echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
           sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
-          
-          # Install VNC and GUI components
-          sudo apt-get install -y tigervnc-standalone-server fluxbox xterm
-          
+          sudo apt-get install -y google-chrome-stable tigervnc-standalone-server fluxbox xterm
           echo "✅ Environment setup complete"
 
       - name: Configure VNC
         run: |
-          # Create VNC directory and set password
           mkdir -p ~/.vnc
           echo "${{ github.event.inputs.password }}" | vncpasswd -f > ~/.vnc/passwd
           chmod 600 ~/.vnc/passwd
-          
-          # Create VNC startup script
-          cat > ~/.vnc/xstartup << 'XSTART'
-#!/bin/bash
-fluxbox &
-sleep 3
-google-chrome --no-sandbox --disable-dev-shm-usage --disable-gpu --start-maximized --no-first-run "https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" &
-XSTART
-          
+          echo "#!/bin/bash" > ~/.vnc/xstartup
+          echo "fluxbox &" >> ~/.vnc/xstartup
+          echo "sleep 3" >> ~/.vnc/xstartup
+          echo "google-chrome --no-sandbox --disable-dev-shm-usage --disable-gpu --start-maximized --no-first-run \"https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo\" &" >> ~/.vnc/xstartup
           chmod +x ~/.vnc/xstartup
           echo "✅ VNC configured"
 
@@ -59,20 +47,15 @@ XSTART
 
       - name: Setup web interface
         run: |
-          # Install websockify for VNC web access
           pip3 install websockify
-          
-          # Download noVNC
           wget https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz
           tar xf v1.4.0.tar.gz
           mv noVNC-1.4.0 novnc
-          
           echo "✅ Web interface ready"
 
       - name: Start web server
         run: |
           cd novnc
-          # Start websockify to bridge VNC to web
           websockify --web . 6080 localhost:5901 &
           sleep 5
           echo "✅ Web server running on port 6080"
@@ -80,14 +63,9 @@ XSTART
       - name: Create tunnel
         run: |
           npm install -g localtunnel
-          
-          # Start tunnel
           nohup lt --port 6080 > tunnel.log 2>&1 &
           sleep 15
-          
-          # Get tunnel URL
           TUNNEL_URL=$(grep -o 'https://.*\.loca\.lt' tunnel.log | head -1)
-          
           if [ -n "$TUNNEL_URL" ]; then
             echo "🎉 SUCCESS! Chrome Browser is Ready!"
             echo "================================================"
@@ -104,13 +82,10 @@ XSTART
             echo "5. Click 'Add to Chrome' to install Tampermonkey"
             echo ""
             echo "✨ You'll see the actual Chrome browser interface!"
-            
-            # GitHub summary
             echo "## 🚀 Chrome Browser Ready" >> $GITHUB_STEP_SUMMARY
             echo "**URL:** $TUNNEL_URL" >> $GITHUB_STEP_SUMMARY
             echo "**Password:** ${{ github.event.inputs.password }}" >> $GITHUB_STEP_SUMMARY
             echo "**Usage:** Click URL → Connect → Enter Password → Use Chrome" >> $GITHUB_STEP_SUMMARY
-            
           else
             echo "❌ Failed to create tunnel"
             cat tunnel.log
