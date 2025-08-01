@@ -49,7 +49,7 @@ jobs:
           sudo mkdir -p /home/sshuser/Downloads
           
           # Create startup script for GUI
-          cat << 'EOF' | sudo tee /home/sshuser/start-gui.sh
+          sudo tee /home/sshuser/start-gui.sh > /dev/null << 'EOF'
 #!/bin/bash
 export DISPLAY=:1
 # Start virtual display
@@ -84,7 +84,7 @@ EOF
           sudo mkdir -p /home/sshuser/.config/google-chrome/Default/Extensions
           
           # Create Chrome preferences to install Tampermonkey
-          cat << 'EOF' | sudo tee /home/sshuser/.config/google-chrome/Default/Preferences
+          sudo tee /home/sshuser/.config/google-chrome/Default/Preferences > /dev/null << 'EOF'
 {
    "extensions": {
       "settings": {
